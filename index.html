@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="hi-IN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#eaf2ef">
+<title>Spend Tracker / खर्च ट्रैकर</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<style>
+  /* Soft palette:
+     text #2b3a35, muted #5a6a65, page #f5f7f6, mint #eaf2ef, primary #2f7564,
+     dark green text #1f5246, border #e8eeeb, input border #869490, danger #a63a32 */
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, "Noto Sans Devanagari", "Noto Sans", sans-serif;
+    background: #f5f7f6;
+    color: #2b3a35;
+    font-size: 16px;
+    line-height: 1.5;
+  }
+  header {
+    background: #eaf2ef;
+    color: #1f5246;
+    padding: 14px 16px;
+    font-size: 18px;
+    font-weight: 600;
+    border-bottom: 1px solid #dde7e3;
+  }
+  main { padding: 12px; max-width: 640px; margin: 0 auto; }
+  .card {
+    background: #fff;
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 14px;
+    border: 1px solid #e8eeeb;
+    box-shadow: 0 1px 2px rgba(31,82,70,0.06);
+  }
+  h2 { font-size: 16px; font-weight: 600; color: #24332e; line-height: 1.35; margin: 0 0 12px; }
+  /* Qualifier text such as "(from selected date)" goes on its own line. */
+  h2 .muted { display: block; font-weight: 400; margin-top: 2px; }
+  label { display: block; font-size: 13px; color: #5a6a65; margin: 10px 0 4px; }
+  input {
+    width: 100%;
+    padding: 12px;
+    font-size: 16px;
+    font-family: inherit;
+    color: inherit;
+    background: #fff;
+    border: 1px solid #869490;
+    border-radius: 10px;
+  }
+  input:focus { outline: none; border-color: #2f7564; box-shadow: 0 0 0 3px rgba(47,117,100,0.15); }
+  .row { display: flex; gap: 10px; }
+  .row > div { flex: 1; min-width: 0; }
+  button {
+    font-family: inherit;
+    font-size: 16px;
+    border: none;
+    border-radius: 10px;
+    padding: 12px 16px;
+    cursor: pointer;
+  }
+  button:active { filter: brightness(0.95); }
+  .primary {
+    background: #2f7564; color: #fff; font-weight: 600;
+    width: 100%; min-height: 48px; margin-top: 14px;
+  }
+  .secondary { background: #edf2f0; color: #2b3a35; }
+  .small { padding: 10px 14px; min-height: 44px; font-size: 14px; }
+
+  /* KPI cards */
+  .kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .kpi {
+    background: #f1f6f4; border-radius: 12px; padding: 12px 14px;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .kpi .label { font-size: 13px; color: #5a6a65; min-height: 2.6em; }
+  .kpi .value { font-size: 22px; font-weight: 600; color: #1f5246; margin-top: 4px; }
+  .kpi .sub { font-size: 13px; color: #5a6a65; margin-top: 2px; }
+
+  /* Tables and lists */
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td, th { padding: 10px 4px; border-bottom: 1px solid #e8eeeb; text-align: left; vertical-align: top; }
+  th { font-size: 13px; color: #5a6a65; font-weight: 600; }
+  .num { text-align: right; white-space: nowrap; }
+  .num, .item-amount, .kpi .value { font-variant-numeric: tabular-nums; }
+  .muted { color: #5a6a65; font-size: 13px; }
+  .bar-track { height: 6px; background: #e9f0ed; border-radius: 3px; margin-top: 6px; }
+  .bar { height: 6px; background: #7fb3a5; border-radius: 3px; min-width: 4px; }
+  .item { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid #e8eeeb; }
+  .item:last-child { border-bottom: none; }
+  .item-main { flex: 1; min-width: 0; }
+  .item-main .muted { margin-top: 2px; }
+  .item-desc { overflow-wrap: anywhere; }
+  .item-amount { font-weight: 600; color: #24332e; white-space: nowrap; }
+  #topN { width: 96px; }
+
+  /* Delete buttons are quiet. They turn red only when pressed. */
+  .del {
+    background: transparent; color: #869490;
+    width: 44px; height: 44px; padding: 0; font-size: 16px; flex-shrink: 0;
+  }
+  .del:active { background: #fdf1ef; color: #a63a32; }
+
+  main { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .empty {
+    color: #5a6a65; font-size: 14px; text-align: center;
+    padding: 24px 12px; background: #f8faf9; border-radius: 10px;
+  }
+  canvas { width: 100%; height: 200px; display: block; }
+  .actions { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .actions button { width: 100%; }
+  .danger {
+    background: transparent; color: #a63a32; border: 1px solid #ecc9c4;
+    width: 100%; margin-top: 20px;
+  }
+  .danger:active { background: #fdf1ef; }
+  .card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .card-head h2 { margin: 0; }
+
+  /* Full-screen table view */
+  #tableView {
+    display: none; position: fixed; inset: 0; background: #fff; z-index: 10;
+    flex-direction: column;
+  }
+  #tableView.open { display: flex; }
+  .table-bar {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px; background: #eaf2ef; color: #1f5246; border-bottom: 1px solid #dde7e3;
+  }
+  .table-bar .title { font-size: 18px; font-weight: 600; }
+  #tableCount { color: #5a6a65; }
+  .table-scroll { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; }
+  .grid { width: max-content; min-width: 100%; font-size: 14px; }
+  .grid th {
+    position: sticky; top: 0; background: #f5f7f6; z-index: 1;
+    padding: 10px 8px; border-bottom: 1px solid #dde7e3;
+  }
+  .grid td { padding: 6px 8px; border-bottom: 1px solid #e8eeeb; vertical-align: middle; }
+  .grid tr.editing td { background: #f1f6f4; }
+  .grid tr.editing td:first-child { box-shadow: inset 3px 0 0 #2f7564; }
+  .grid .desc-cell { min-width: 180px; max-width: 260px; overflow-wrap: anywhere; }
+  .grid input { padding: 10px; font-size: 15px; }
+  .grid input.w-date { width: 150px; }
+  .grid input.w-amount { width: 100px; }
+  .grid input.w-desc { width: 200px; }
+  .grid input.w-owner { width: 110px; }
+  .row-btns { display: flex; gap: 6px; }
+  .icon-btn {
+    width: 44px; height: 44px; padding: 0; font-size: 16px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .table-bar .secondary { background: #fff; border: 1px solid #dde7e3; }
+  .edit { background: transparent; color: #5a6a65; }
+  .edit:active { background: #edf2f0; }
+  .grid .del { color: #a63a32; }
+  .save { background: #2f7564; color: #fff; }
+</style>
+</head>
+<body>
+<header>Spend Tracker / खर्च ट्रैकर</header>
+<main>
+
+  <!-- Add spend -->
+  <section class="card">
+    <h2>Add spend / खर्च जोड़ें</h2>
+    <form id="addForm">
+      <div class="row">
+        <div>
+          <label for="date">Date / दिनांक</label>
+          <input type="date" id="date" required>
+        </div>
+        <div>
+          <label for="amount">Amount / राशि (₹)</label>
+          <input type="number" id="amount" inputmode="decimal" step="0.01" min="0.01" required>
+        </div>
+      </div>
+      <label for="desc">Description / विवरण</label>
+      <input type="text" id="desc" lang="hi" placeholder="e.g. Milk / दूध">
+      <label for="owner">Person / व्यक्ति</label>
+      <input type="text" id="owner" list="ownerList" value="all">
+      <datalist id="ownerList"></datalist>
+      <button type="submit" class="primary">Save / ऐड करें</button>
+    </form>
+  </section>
+
+  <!-- Insights -->
+  <section class="card">
+    <h2>Insights / जानकारी</h2>
+    <label for="fromDate">From date / इस दिनांक से</label>
+    <input type="date" id="fromDate">
+    <div class="kpis" style="margin-top:12px">
+      <div class="kpi">
+        <div class="label">This month / इस महीने</div>
+        <div class="value" id="kpiMonth">₹0</div>
+        <div class="sub" id="kpiMonthCount"></div>
+      </div>
+      <div class="kpi">
+        <div class="label">From selected date / चुने दिनांक से</div>
+        <div class="value" id="kpiFrom">₹0</div>
+        <div class="sub" id="kpiFromCount"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Share by person / व्यक्ति के अनुसार हिस्सा <span class="muted">(from selected date / चुने दिनांक से)</span></h2>
+    <div id="ownerShare"></div>
+  </section>
+
+  <section class="card">
+    <h2>Top spends / सबसे बड़े खर्च <span class="muted">(from selected date / चुने दिनांक से)</span></h2>
+    <label for="topN">Number of spends / खर्चों की संख्या (N)</label>
+    <input type="number" id="topN" inputmode="numeric" min="1" value="10">
+    <div id="topList" style="margin-top:8px"></div>
+  </section>
+
+  <section class="card">
+    <h2>Monthly spend / मासिक खर्च <span class="muted">(last 12 months / पिछले 12 महीने)</span></h2>
+    <canvas id="chart"></canvas>
+  </section>
+
+  <!-- All spends -->
+  <section class="card">
+    <div class="card-head">
+      <h2>All spends / सभी खर्च</h2>
+      <button class="secondary small" id="openTableBtn">Open table / डिटेल हिसाब</button>
+    </div>
+    <div id="spendList"></div>
+  </section>
+
+  <!-- Backup -->
+  <section class="card">
+    <h2>Backup / बैकअप</h2>
+    <p class="muted">Your data is saved only on this phone. Export a CSV file regularly as a backup.<br>आपका डेटा केवल इस फ़ोन पर सहेजा जाता है। बैकअप के लिए नियमित रूप से CSV फ़ाइल निर्यात करें।</p>
+    <div class="actions">
+      <button class="secondary" id="exportBtn">Export CSV / निर्यात करें</button>
+      <button class="secondary" id="importBtn">Import CSV / आयात करें</button>
+      <input type="file" id="importFile" accept=".csv,text/csv" style="display:none">
+    </div>
+    <button class="danger" id="resetBtn">Reset all data / सारा डेटा हटाएँ</button>
+  </section>
+
+</main>
+
+<!-- Full-screen table: view, edit and delete rows -->
+<div id="tableView">
+  <div class="table-bar">
+    <div>
+      <div class="title">Spends table / खर्च तालिका</div>
+      <div id="tableCount" style="font-size:12px"></div>
+    </div>
+    <button class="secondary small" id="closeTableBtn">Close / बंद करें</button>
+  </div>
+  <div class="table-scroll">
+    <table class="grid">
+      <thead>
+        <tr><th></th><th>Date / दिनांक</th><th class="num">Amount / राशि</th><th>Description / विवरण</th><th>Person / व्यक्ति</th></tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+// ---------- Storage ----------
+const STORAGE_KEY = "spends_v1";
+
+function loadSpends() {
+  const text = localStorage.getItem(STORAGE_KEY);
+  return text ? JSON.parse(text) : [];
+}
+
+function saveSpends(spends) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(spends));
+}
+
+let spends = loadSpends();
+
+// Ask the browser not to clear our data when the phone is low on space.
+if (navigator.storage && navigator.storage.persist) {
+  navigator.storage.persist();
+}
+
+// ---------- Helpers ----------
+const rupee = new Intl.NumberFormat("en-IN", {
+  style: "currency", currency: "INR", minimumFractionDigits: 0, maximumFractionDigits: 2
+});
+
+function formatRupee(value) {
+  return rupee.format(value);
+}
+
+// Local date as YYYY-MM-DD (do not use toISOString, it gives the UTC date).
+function toDateString(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return y + "-" + m + "-" + day;
+}
+
+function todayString() {
+  return toDateString(new Date());
+}
+
+function firstOfMonthString() {
+  const now = new Date();
+  return toDateString(new Date(now.getFullYear(), now.getMonth(), 1));
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function sumAmounts(list) {
+  return list.reduce((total, s) => total + s.amount, 0);
+}
+
+function newId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+// ---------- Add spend ----------
+const dateInput = document.getElementById("date");
+const amountInput = document.getElementById("amount");
+const descInput = document.getElementById("desc");
+const ownerInput = document.getElementById("owner");
+
+dateInput.value = todayString();
+
+document.getElementById("addForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const amount = parseFloat(amountInput.value);
+  if (!(amount > 0)) return;
+
+  spends.push({
+    id: newId(),
+    date: dateInput.value,
+    amount: amount,
+    desc: descInput.value.trim(),
+    owner: ownerInput.value.trim() || "all"
+  });
+  saveSpends(spends);
+
+  // Keep date and owner for the next entry. Clear amount and description.
+  amountInput.value = "";
+  descInput.value = "";
+  amountInput.focus();
+  render();
+});
+
+// ---------- Remove spend ----------
+function deleteSpend(id) {
+  const spend = spends.find(s => s.id === id);
+  const message = "Delete this spend? / यह खर्च हटाएँ?\n" + spend.date + "  " + formatRupee(spend.amount) + "\n" + spend.desc;
+  if (!confirm(message)) return;
+  spends = spends.filter(s => s.id !== id);
+  saveSpends(spends);
+  render();
+}
+
+// ---------- Insights ----------
+const fromDateInput = document.getElementById("fromDate");
+const topNInput = document.getElementById("topN");
+
+fromDateInput.value = firstOfMonthString();
+fromDateInput.addEventListener("change", render);
+topNInput.addEventListener("input", render);
+
+function spendsFromSelectedDate() {
+  const from = fromDateInput.value;
+  const today = todayString();
+  return spends.filter(s => s.date >= from && s.date <= today);
+}
+
+function renderKpis() {
+  const monthPrefix = todayString().slice(0, 7);
+  const thisMonth = spends.filter(s => s.date.startsWith(monthPrefix));
+  document.getElementById("kpiMonth").textContent = formatRupee(sumAmounts(thisMonth));
+  document.getElementById("kpiMonthCount").textContent = thisMonth.length + " spends / खर्च";
+
+  const fromList = spendsFromSelectedDate();
+  document.getElementById("kpiFrom").textContent = formatRupee(sumAmounts(fromList));
+  document.getElementById("kpiFromCount").textContent = fromList.length + " spends / खर्च";
+}
+
+function renderOwnerShare() {
+  const fromList = spendsFromSelectedDate();
+  const box = document.getElementById("ownerShare");
+  const total = sumAmounts(fromList);
+  if (total === 0) {
+    box.innerHTML = '<div class="empty">No spends in this period / इस अवधि में कोई खर्च नहीं</div>';
+    return;
+  }
+
+  const byOwner = {};
+  for (const s of fromList) {
+    byOwner[s.owner] = (byOwner[s.owner] || 0) + s.amount;
+  }
+  const rows = Object.entries(byOwner).sort((a, b) => b[1] - a[1]);
+
+  let html = "<table><tr><th>Person / व्यक्ति</th><th class='num'>Amount / राशि</th><th class='num'>Share / हिस्सा</th></tr>";
+  for (const [owner, amount] of rows) {
+    const share = amount / total * 100;
+    html += "<tr><td>" + escapeHtml(owner)
+      + "<div class='bar-track'><div class='bar' style='width:" + share.toFixed(1) + "%'></div></div></td>"
+      + "<td class='num'>" + formatRupee(amount) + "</td>"
+      + "<td class='num'>" + share.toFixed(1) + "%</td></tr>";
+  }
+  html += "</table>";
+  box.innerHTML = html;
+}
+
+function renderTopSpends() {
+  const n = Math.max(1, parseInt(topNInput.value) || 10);
+  const top = spendsFromSelectedDate()
+    .slice()
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, n);
+  document.getElementById("topList").innerHTML = spendTable(top, false);
+}
+
+// Monthly totals for the last 12 months, oldest first.
+function monthlyTotals() {
+  const now = new Date();
+  const months = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = toDateString(d).slice(0, 7);
+    const label = d.toLocaleString("en-IN", { month: "short" });
+    const total = sumAmounts(spends.filter(s => s.date.startsWith(key)));
+    months.push({ key, label, total });
+  }
+  return months;
+}
+
+function renderChart() {
+  const canvas = document.getElementById("chart");
+  const ratio = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  canvas.width = width * ratio;
+  canvas.height = height * ratio;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(ratio, ratio);
+  ctx.clearRect(0, 0, width, height);
+
+  const months = monthlyTotals();
+  const maxTotal = Math.max(...months.map(m => m.total), 1);
+
+  const padLeft = 10, padRight = 10, padTop = 28, padBottom = 24;
+  const plotW = width - padLeft - padRight;
+  const plotH = height - padTop - padBottom;
+  const xAt = i => padLeft + plotW * i / (months.length - 1);
+  const yAt = v => padTop + plotH * (1 - v / maxTotal);
+  const lineColor = "#2f7564";
+
+  // Faint dashed gridlines at 50% and 100% of the highest month
+  ctx.strokeStyle = "#edf1ef";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 4]);
+  for (const f of [0.5, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(padLeft, yAt(maxTotal * f));
+    ctx.lineTo(width - padRight, yAt(maxTotal * f));
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // Base line
+  ctx.strokeStyle = "#e8eeeb";
+  ctx.beginPath();
+  ctx.moveTo(padLeft, yAt(0));
+  ctx.lineTo(width - padRight, yAt(0));
+  ctx.stroke();
+
+  // Soft area fill under the line
+  const fill = ctx.createLinearGradient(0, padTop, 0, yAt(0));
+  fill.addColorStop(0, "rgba(47,117,100,0.18)");
+  fill.addColorStop(1, "rgba(47,117,100,0)");
+  ctx.beginPath();
+  months.forEach((m, i) => {
+    if (i === 0) ctx.moveTo(xAt(i), yAt(m.total));
+    else ctx.lineTo(xAt(i), yAt(m.total));
+  });
+  ctx.lineTo(xAt(months.length - 1), yAt(0));
+  ctx.lineTo(xAt(0), yAt(0));
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+
+  // Line
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 2.5;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  months.forEach((m, i) => {
+    if (i === 0) ctx.moveTo(xAt(i), yAt(m.total));
+    else ctx.lineTo(xAt(i), yAt(m.total));
+  });
+  ctx.stroke();
+
+  // Month labels
+  ctx.font = "12px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#5a6a65";
+  months.forEach((m, i) => ctx.fillText(m.label, xAt(i), height - 6));
+
+  // Point and value label only for the highest month and the current month
+  const maxIndex = months.findIndex(m => m.total === maxTotal);
+  const labelIndexes = new Set([maxIndex, months.length - 1]);
+  ctx.font = "600 12px system-ui, sans-serif";
+  for (const i of labelIndexes) {
+    if (i < 0 || months[i].total === 0) continue;
+    ctx.fillStyle = "#fff";
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(xAt(i), yAt(months[i].total), 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#1f5246";
+    ctx.textAlign = i === 0 ? "left" : (i === months.length - 1 ? "right" : "center");
+    ctx.fillText(shortRupee(months[i].total), xAt(i), yAt(months[i].total) - 10);
+  }
+}
+
+// Short label for the chart: ₹1.2L, ₹45K, ₹900
+function shortRupee(value) {
+  if (value >= 100000) return "₹" + (value / 100000).toFixed(1) + "L";
+  if (value >= 1000) return "₹" + (value / 1000).toFixed(1) + "K";
+  return "₹" + Math.round(value);
+}
+
+// ---------- Spend list ----------
+// One compact row per spend: description on top, date and owner below, amount on the right.
+function spendTable(list, withDelete) {
+  if (list.length === 0) return '<div class="empty">No spends / कोई खर्च नहीं</div>';
+  let html = "";
+  for (const s of list) {
+    html += "<div class='item'>"
+      + "<div class='item-main'>"
+      + "<div class='item-desc' lang='hi'>" + (escapeHtml(s.desc) || "<span class='muted'>No description / कोई विवरण नहीं</span>") + "</div>"
+      + "<div class='muted'>" + formatDate(s.date) + " · " + escapeHtml(s.owner) + "</div>"
+      + "</div>"
+      + "<div class='item-amount'>" + formatRupee(s.amount) + "</div>"
+      + (withDelete ? "<button class='del' data-id='" + s.id + "' aria-label='Delete'>✕</button>" : "")
+      + "</div>";
+  }
+  return html;
+}
+
+// 2026-10-30 -> 30 Oct 2026
+function formatDate(dateString) {
+  const [y, m, d] = dateString.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function renderSpendList() {
+  const sorted = spends.slice().sort((a, b) => b.date.localeCompare(a.date));
+  const box = document.getElementById("spendList");
+  box.innerHTML = spendTable(sorted, true);
+  box.querySelectorAll(".del").forEach(btn => {
+    btn.addEventListener("click", () => deleteSpend(btn.dataset.id));
+  });
+}
+
+function renderOwnerSuggestions() {
+  const owners = [...new Set(["all", ...spends.map(s => s.owner)])];
+  document.getElementById("ownerList").innerHTML =
+    owners.map(o => "<option value='" + escapeHtml(o) + "'>").join("");
+}
+
+function render() {
+  renderKpis();
+  renderOwnerShare();
+  renderTopSpends();
+  renderChart();
+  renderSpendList();
+  renderOwnerSuggestions();
+  if (tableView.classList.contains("open")) renderTable();
+}
+
+window.addEventListener("resize", renderChart);
+
+// ---------- Table view (edit and delete rows) ----------
+const tableView = document.getElementById("tableView");
+const tableBody = document.getElementById("tableBody");
+let editingId = null;   // id of the row that is in edit mode, or null
+
+// SVG pencil: the ✎ character shows as a colour emoji on some phones.
+const PENCIL_ICON = "<svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' "
+  + "stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
+  + "<path d='M12 20h9'/><path d='M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z'/></svg>";
+
+function openTable() {
+  editingId = null;
+  renderTable();
+  tableView.classList.add("open");
+  // Add a history entry so the Android back button closes the table.
+  history.pushState({ table: true }, "");
+}
+
+function closeTable() {
+  tableView.classList.remove("open");
+  editingId = null;
+}
+
+document.getElementById("openTableBtn").addEventListener("click", openTable);
+document.getElementById("closeTableBtn").addEventListener("click", () => history.back());
+window.addEventListener("popstate", closeTable);
+
+function renderTable() {
+  const sorted = spends.slice().sort((a, b) => b.date.localeCompare(a.date));
+  document.getElementById("tableCount").textContent =
+    sorted.length + " spends / खर्च · " + formatRupee(sumAmounts(sorted));
+
+  if (sorted.length === 0) {
+    tableBody.innerHTML = "<tr><td colspan='5' class='empty'>No spends / कोई खर्च नहीं</td></tr>";
+    return;
+  }
+
+  let html = "";
+  for (const s of sorted) {
+    if (s.id === editingId) {
+      // Buttons are in the first column, so they are visible without a side scroll.
+      html += "<tr class='editing'>"
+        + "<td><div class='row-btns'>"
+        + "<button class='icon-btn save' data-action='save' data-id='" + s.id + "' aria-label='Save'>✓</button>"
+        + "<button class='icon-btn edit' data-action='cancel' aria-label='Cancel'>↺</button>"
+        + "</div></td>"
+        + "<td><input type='date' class='w-date' id='editDate' value='" + s.date + "'></td>"
+        + "<td><input type='number' class='w-amount' id='editAmount' inputmode='decimal' step='0.01' min='0.01' value='" + s.amount + "'></td>"
+        + "<td><input type='text' class='w-desc' id='editDesc' lang='hi' value='" + escapeHtml(s.desc).replace(/'/g, "&#39;") + "'></td>"
+        + "<td><input type='text' class='w-owner' id='editOwner' list='ownerList' value='" + escapeHtml(s.owner).replace(/'/g, "&#39;") + "'></td>"
+        + "</tr>";
+    } else {
+      html += "<tr>"
+        + "<td><div class='row-btns'>"
+        + "<button class='icon-btn edit' data-action='edit' data-id='" + s.id + "' aria-label='Edit'>" + PENCIL_ICON + "</button>"
+        + "<button class='icon-btn del' data-action='delete' data-id='" + s.id + "' aria-label='Delete'>✕</button>"
+        + "</div></td>"
+        + "<td style='white-space:nowrap'>" + formatDate(s.date) + "</td>"
+        + "<td class='num'>" + formatRupee(s.amount) + "</td>"
+        + "<td class='desc-cell' lang='hi'>" + escapeHtml(s.desc) + "</td>"
+        + "<td>" + escapeHtml(s.owner) + "</td>"
+        + "</tr>";
+    }
+  }
+  tableBody.innerHTML = html;
+}
+
+function saveEdit(id) {
+  const date = document.getElementById("editDate").value;
+  const amount = parseFloat(document.getElementById("editAmount").value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !(amount > 0)) {
+    alert("Enter a valid date and an amount more than 0.\nसही दिनांक और 0 से अधिक राशि डालें।");
+    return;
+  }
+  const spend = spends.find(s => s.id === id);
+  spend.date = date;
+  spend.amount = amount;
+  spend.desc = document.getElementById("editDesc").value.trim();
+  spend.owner = document.getElementById("editOwner").value.trim() || "all";
+  saveSpends(spends);
+  editingId = null;
+  render();
+}
+
+// One click handler for all row buttons.
+tableBody.addEventListener("click", (event) => {
+  const btn = event.target.closest("button");
+  if (!btn) return;
+  const action = btn.dataset.action;
+  if (action === "edit") { editingId = btn.dataset.id; renderTable(); }
+  if (action === "cancel") { editingId = null; renderTable(); }
+  if (action === "save") saveEdit(btn.dataset.id);
+  if (action === "delete") deleteSpend(btn.dataset.id);
+});
+
+// ---------- CSV export / import ----------
+function csvField(value) {
+  const text = String(value);
+  if (/[",\n\r]/.test(text)) return '"' + text.replace(/"/g, '""') + '"';
+  return text;
+}
+
+function spendsToCsv(list) {
+  const lines = ["date,amount,description,person"];
+  for (const s of list) {
+    lines.push([s.date, s.amount, s.desc, s.owner].map(csvField).join(","));
+  }
+  return lines.join("\r\n");
+}
+
+// Simple CSV parser. It handles quoted fields with commas, quotes and new lines.
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = "", inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (c === '"') inQuotes = false;
+      else field += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(field); rows.push(row); row = []; field = "";
+    } else field += c;
+  }
+  if (field !== "" || row.length > 0) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+function csvToSpends(text) {
+  const rows = parseCsv(text.replace(/^\uFEFF/, ""));
+  const result = [];
+  for (const r of rows.slice(1)) {
+    const amount = parseFloat(r[1]);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(r[0] || "") || !(amount > 0)) continue;
+    result.push({
+      id: newId(),
+      date: r[0],
+      amount: amount,
+      desc: (r[2] || "").trim(),
+      owner: (r[3] || "").trim() || "all"
+    });
+  }
+  return result;
+}
+
+document.getElementById("exportBtn").addEventListener("click", () => {
+  // The BOM (\uFEFF) makes Excel read Devanagari text correctly.
+  const blob = new Blob(["\uFEFF" + spendsToCsv(spends)], { type: "text/csv;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "spends_" + todayString() + ".csv";
+  link.click();
+  URL.revokeObjectURL(link.href);
+});
+
+const importFile = document.getElementById("importFile");
+document.getElementById("importBtn").addEventListener("click", () => importFile.click());
+
+importFile.addEventListener("change", async () => {
+  const file = importFile.files[0];
+  importFile.value = "";
+  if (!file) return;
+  const imported = csvToSpends(await file.text());
+  if (imported.length === 0) {
+    alert("No valid rows found. / कोई सही पंक्ति नहीं मिली।\nExpected columns: date,amount,description,person");
+    return;
+  }
+  const message = "Found " + imported.length + " spends in the file. / फ़ाइल में खर्च मिले।\n"
+    + "OK = REPLACE all current data (" + spends.length + " spends).\nOK = सभी मौजूदा डेटा बदलें।\n"
+    + "Cancel = do nothing. / कुछ न करें।";
+  if (!confirm(message)) return;
+  spends = imported;
+  saveSpends(spends);
+  render();
+});
+
+// ---------- Reset ----------
+document.getElementById("resetBtn").addEventListener("click", () => {
+  const message = "Delete ALL " + spends.length + " spends? This cannot be undone. Export a CSV first if you need a backup.\n"
+    + "सभी " + spends.length + " खर्च हटाएँ? यह वापस नहीं होगा। ज़रूरत हो तो पहले CSV निर्यात करें।";
+  if (!confirm(message)) return;
+  spends = [];
+  saveSpends(spends);
+  dateInput.value = todayString();
+  amountInput.value = "";
+  descInput.value = "";
+  ownerInput.value = "all";
+  fromDateInput.value = firstOfMonthString();
+  topNInput.value = 10;
+  render();
+});
+
+// ---------- Start ----------
+render();
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js");
+}
+</script>
+</body>
+</html>
