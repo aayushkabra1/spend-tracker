@@ -1,6 +1,6 @@
 // Service worker: caches the app files so the app works offline.
 // Change CACHE_NAME when you update any app file, so phones get the new version.
-const CACHE_NAME = "spend-tracker-v4";
+const CACHE_NAME = "spend-tracker-v5";
 const FILES = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (event) => {

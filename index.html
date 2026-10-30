@@ -126,6 +126,19 @@
     width: 100%; padding: 12px; font-size: 16px; font-family: inherit; color: inherit;
     background: #fff; border: 1px solid #869490; border-radius: 10px;
   }
+  /* Collapsible settings section */
+  .settings summary {
+    font-size: 16px; font-weight: 600; color: #24332e; cursor: pointer;
+    list-style: none; display: flex; justify-content: space-between; align-items: center;
+    min-height: 44px;
+  }
+  .settings summary::-webkit-details-marker { display: none; }
+  .settings summary::after { content: "▾"; color: #5a6a65; transition: transform 0.2s; }
+  .settings[open] summary::after { transform: rotate(180deg); }
+  .settings section { border-top: 1px solid #e8eeeb; margin-top: 14px; padding-top: 14px; }
+  .key-row { display: flex; gap: 8px; }
+  .key-row input { flex: 1; min-width: 0; }
+  .key-row button { flex-shrink: 0; }
   .card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
   .card-head h2 { margin: 0; }
 
@@ -241,14 +254,21 @@
     <div id="spendList"></div>
   </section>
 
+  <!-- Settings and backup: closed by default, because they are not used daily -->
+  <details class="card settings">
+  <summary>Settings and backup / सेटिंग्स और बैकअप</summary>
+
   <!-- Google Sheet sync -->
-  <section class="card">
+  <section>
     <h2>Google Sheet sync / गूगल शीट सिंक</h2>
     <p class="muted">After each change, the app sends your data to your own Google Sheet. The Sheet keeps one backup per day for 30 days.<br>हर बदलाव के बाद ऐप आपका डेटा आपकी अपनी गूगल शीट में भेजता है। शीट 30 दिन तक हर दिन का एक बैकअप रखती है।</p>
     <label for="syncUrl">Web app link / वेब ऐप लिंक</label>
     <input type="url" id="syncUrl" placeholder="https://script.google.com/macros/s/.../exec">
     <label for="syncKey">Secret key / गुप्त कुंजी</label>
-    <input type="password" id="syncKey">
+    <div class="key-row">
+      <input type="password" id="syncKey" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <button type="button" class="secondary small" id="showKeyBtn">Show / दिखाएँ</button>
+    </div>
     <div class="actions" style="margin-top:12px">
       <button class="secondary" id="syncSaveBtn">Save and sync now / सेव करें और अभी सिंक करें</button>
     </div>
@@ -263,7 +283,7 @@
   </section>
 
   <!-- Backup -->
-  <section class="card">
+  <section>
     <h2>Backup / बैकअप</h2>
     <p class="muted">Your data is saved on this phone. Export a CSV file from time to time for an extra backup.<br>आपका डेटा इस फ़ोन पर सहेजा जाता है। अतिरिक्त बैकअप के लिए समय-समय पर CSV फ़ाइल निर्यात करें।</p>
     <div class="actions">
@@ -273,6 +293,7 @@
     </div>
     <button class="danger" id="resetBtn">Reset all data / सारा डेटा हटाएँ</button>
   </section>
+  </details>
 
 </main>
 
@@ -908,6 +929,14 @@ const syncUrlInput = document.getElementById("syncUrl");
 const syncKeyInput = document.getElementById("syncKey");
 syncUrlInput.value = loadSyncSettings().url;
 syncKeyInput.value = loadSyncSettings().key;
+
+// Show or hide the secret key
+const showKeyBtn = document.getElementById("showKeyBtn");
+showKeyBtn.addEventListener("click", () => {
+  const hidden = syncKeyInput.type === "password";
+  syncKeyInput.type = hidden ? "text" : "password";
+  showKeyBtn.textContent = hidden ? "Hide / छिपाएँ" : "Show / दिखाएँ";
+});
 
 document.getElementById("syncSaveBtn").addEventListener("click", () => {
   localStorage.setItem(SYNC_KEY, JSON.stringify({ url: syncUrlInput.value.trim(), key: syncKeyInput.value.trim() }));
