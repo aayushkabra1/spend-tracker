@@ -117,6 +117,15 @@
     width: 100%; margin-top: 20px;
   }
   .danger:active { background: #fdf1ef; }
+  .sync-status {
+    font-size: 13px; color: #5a6a65; padding: 6px 16px;
+    background: #f5f7f6; border-bottom: 1px solid #e8eeeb;
+  }
+  .sync-status.bad { color: #a63a32; background: #fdf1ef; }
+  select {
+    width: 100%; padding: 12px; font-size: 16px; font-family: inherit; color: inherit;
+    background: #fff; border: 1px solid #869490; border-radius: 10px;
+  }
   .card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
   .card-head h2 { margin: 0; }
 
@@ -161,6 +170,7 @@
 </head>
 <body>
 <header>Spend Tracker / खर्च ट्रैकर</header>
+<div id="syncStatus" class="sync-status"></div>
 <main>
 
   <!-- Add spend -->
@@ -231,10 +241,31 @@
     <div id="spendList"></div>
   </section>
 
+  <!-- Google Sheet sync -->
+  <section class="card">
+    <h2>Google Sheet sync / गूगल शीट सिंक</h2>
+    <p class="muted">After each change, the app sends your data to your own Google Sheet. The Sheet keeps one backup per day for 30 days.<br>हर बदलाव के बाद ऐप आपका डेटा आपकी अपनी गूगल शीट में भेजता है। शीट 30 दिन तक हर दिन का एक बैकअप रखती है।</p>
+    <label for="syncUrl">Web app link / वेब ऐप लिंक</label>
+    <input type="url" id="syncUrl" placeholder="https://script.google.com/macros/s/.../exec">
+    <label for="syncKey">Secret key / गुप्त कुंजी</label>
+    <input type="password" id="syncKey">
+    <div class="actions" style="margin-top:12px">
+      <button class="secondary" id="syncSaveBtn">Save and sync now / सेव करें और अभी सिंक करें</button>
+    </div>
+    <div id="syncMessage" class="muted" style="margin-top:8px"></div>
+
+    <label>Restore from a backup date / बैकअप दिनांक से वापस लाएँ</label>
+    <div class="actions">
+      <button class="secondary" id="loadSnapsBtn">Load backup dates / बैकअप दिनांक देखें</button>
+      <select id="snapshotSelect" style="display:none"></select>
+      <button class="secondary" id="restoreBtn" style="display:none">Restore selected / चुना हुआ वापस लाएँ</button>
+    </div>
+  </section>
+
   <!-- Backup -->
   <section class="card">
     <h2>Backup / बैकअप</h2>
-    <p class="muted">Your data is saved only on this phone. Export a CSV file regularly as a backup.<br>आपका डेटा केवल इस फ़ोन पर सहेजा जाता है। बैकअप के लिए नियमित रूप से CSV फ़ाइल निर्यात करें।</p>
+    <p class="muted">Your data is saved on this phone. Export a CSV file from time to time for an extra backup.<br>आपका डेटा इस फ़ोन पर सहेजा जाता है। अतिरिक्त बैकअप के लिए समय-समय पर CSV फ़ाइल निर्यात करें।</p>
     <div class="actions">
       <button class="secondary" id="exportBtn">Export CSV / निर्यात करें</button>
       <button class="secondary" id="importBtn">Import CSV / आयात करें</button>
@@ -275,6 +306,7 @@ function loadSpends() {
 
 function saveSpends(spends) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(spends));
+  scheduleSync();
 }
 
 let spends = loadSpends();
@@ -769,11 +801,18 @@ importFile.addEventListener("change", async () => {
 
 // ---------- Reset ----------
 document.getElementById("resetBtn").addEventListener("click", () => {
-  const message = "Delete ALL " + spends.length + " spends? This cannot be undone. Export a CSV first if you need a backup.\n"
-    + "सभी " + spends.length + " खर्च हटाएँ? यह वापस नहीं होगा। ज़रूरत हो तो पहले CSV निर्यात करें।";
+  const message = "Delete ALL " + spends.length + " spends on this phone? Google Sheet backups stay, unless you delete them in the next step.\n"
+    + "इस फ़ोन से सभी " + spends.length + " खर्च हटाएँ? गूगल शीट के बैकअप बने रहेंगे, जब तक आप अगले चरण में उन्हें न हटाएँ।";
   if (!confirm(message)) return;
   spends = [];
   saveSpends(spends);
+
+  // Second confirm: also delete the backups in Google Sheet.
+  const clearMessage = "Also delete ALL backups in Google Sheet? This cannot be undone.\n"
+    + "क्या गूगल शीट के सभी बैकअप भी हटाएँ? यह वापस नहीं होगा।";
+  if (syncIsSetUp() && confirm(clearMessage)) {
+    clearSheetBackups();
+  }
   dateInput.value = todayString();
   amountInput.value = "";
   descInput.value = "";
@@ -783,8 +822,174 @@ document.getElementById("resetBtn").addEventListener("click", () => {
   render();
 });
 
+// ---------- Google Sheet sync ----------
+const SYNC_KEY = "sync_v1";             // { url, key }
+const LAST_SYNC_KEY = "last_sync_v1";   // time of the last successful sync (ms)
+const PENDING_KEY = "sync_pending_v1";  // "1" when some changes are not synced yet
+const STALE_DAYS = 3;                   // status turns red after this many days without a sync
+let syncTimer = null;
+let syncError = "";
+let changeNumber = 0;                   // goes up on every change, so a change during a sync is not lost
+
+function loadSyncSettings() {
+  const text = localStorage.getItem(SYNC_KEY);
+  return text ? JSON.parse(text) : { url: "", key: "" };
+}
+
+function syncIsSetUp() {
+  const settings = loadSyncSettings();
+  return settings.url !== "" && settings.key !== "";
+}
+
+// Called by saveSpends after every change. It waits 2 seconds, so quick changes go in one sync.
+function scheduleSync() {
+  changeNumber++;
+  localStorage.setItem(PENDING_KEY, "1");
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(syncNow, 2000);
+}
+
+async function syncNow() {
+  if (!syncIsSetUp() || localStorage.getItem(PENDING_KEY) !== "1") return;
+  // Do not sync empty data. It would replace a good backup.
+  if (spends.length === 0) return;
+
+  const settings = loadSyncSettings();
+  const numberAtStart = changeNumber;
+  try {
+    // A plain text body, because Google Apps Script does not answer a CORS preflight request.
+    const response = await fetch(settings.url, {
+      method: "POST",
+      body: JSON.stringify({ key: settings.key, spends: spends })
+    });
+    const result = await response.json();
+    if (!result.ok) throw new Error(result.error);
+    localStorage.setItem(LAST_SYNC_KEY, String(Date.now()));
+    if (changeNumber === numberAtStart) localStorage.removeItem(PENDING_KEY);
+    syncError = "";
+  } catch (err) {
+    syncError = err.message;
+  }
+  renderSyncStatus();
+}
+
+// 5 min ago, 3 h ago, 2 days ago
+function timeAgo(ms) {
+  const minutes = Math.floor((Date.now() - ms) / 60000);
+  if (minutes < 1) return "just now / अभी";
+  if (minutes < 60) return minutes + " min ago / मिनट पहले";
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours + " h ago / घंटे पहले";
+  return Math.floor(hours / 24) + " days ago / दिन पहले";
+}
+
+function renderSyncStatus() {
+  const box = document.getElementById("syncStatus");
+  let text;
+  let bad = false;
+
+  if (!syncIsSetUp()) {
+    text = "Sync is not set up / सिंक सेट नहीं है";
+  } else {
+    const last = parseInt(localStorage.getItem(LAST_SYNC_KEY) || "0");
+    text = last ? "Last synced / आखिरी सिंक: " + timeAgo(last) : "Not synced yet / अभी सिंक नहीं हुआ";
+    if (localStorage.getItem(PENDING_KEY) === "1") text += " · changes waiting / बदलाव बाकी";
+    if (syncError) text += " · failed / असफल: " + syncError;
+    bad = syncError !== "" || !last || Date.now() - last > STALE_DAYS * 86400000;
+  }
+
+  box.textContent = text;
+  box.className = "sync-status" + (bad ? " bad" : "");
+  document.getElementById("syncMessage").textContent = text;
+}
+
+// Settings
+const syncUrlInput = document.getElementById("syncUrl");
+const syncKeyInput = document.getElementById("syncKey");
+syncUrlInput.value = loadSyncSettings().url;
+syncKeyInput.value = loadSyncSettings().key;
+
+document.getElementById("syncSaveBtn").addEventListener("click", () => {
+  localStorage.setItem(SYNC_KEY, JSON.stringify({ url: syncUrlInput.value.trim(), key: syncKeyInput.value.trim() }));
+  localStorage.setItem(PENDING_KEY, "1");
+  syncError = "";
+  renderSyncStatus();
+  syncNow();
+});
+
+// Restore
+const snapshotSelect = document.getElementById("snapshotSelect");
+const restoreBtn = document.getElementById("restoreBtn");
+
+async function getFromSheet(params) {
+  const settings = loadSyncSettings();
+  const url = settings.url + "?key=" + encodeURIComponent(settings.key) + "&" + params;
+  const result = await (await fetch(url)).json();
+  if (!result.ok) throw new Error(result.error);
+  return result;
+}
+
+document.getElementById("loadSnapsBtn").addEventListener("click", async () => {
+  if (!syncIsSetUp()) { alert("Set up sync first. / पहले सिंक सेट करें।"); return; }
+  try {
+    const result = await getFromSheet("action=list");
+    if (result.snapshots.length === 0) { alert("No backups found. / कोई बैकअप नहीं मिला।"); return; }
+    snapshotSelect.innerHTML = result.snapshots
+      .map(s => "<option value='" + s.name + "'>" + s.name.replace("snap_", "") + " (" + s.count + " spends / खर्च)</option>")
+      .join("");
+    snapshotSelect.style.display = "";
+    restoreBtn.style.display = "";
+  } catch (err) {
+    alert("Could not load backups. / बैकअप लोड नहीं हुए।\n" + err.message);
+  }
+});
+
+restoreBtn.addEventListener("click", async () => {
+  try {
+    const result = await getFromSheet("action=get&snapshot=" + encodeURIComponent(snapshotSelect.value));
+    const restored = result.spends
+      .filter(s => /^\d{4}-\d{2}-\d{2}$/.test(s.date) && s.amount > 0)
+      .map(s => ({ id: s.id || newId(), date: s.date, amount: s.amount, desc: s.desc || "", owner: s.owner || "all" }));
+    const message = "Replace all current data (" + spends.length + " spends) with the backup of "
+      + result.snapshot.replace("snap_", "") + " (" + restored.length + " spends)?\n"
+      + "मौजूदा डेटा को इस बैकअप से बदलें?";
+    if (!confirm(message)) return;
+    spends = restored;
+    saveSpends(spends);
+    render();
+    alert("Restored " + restored.length + " spends. / " + restored.length + " खर्च वापस आए।");
+  } catch (err) {
+    alert("Could not restore. / वापस नहीं ला सके।\n" + err.message);
+  }
+});
+
+// Delete all backups in the Sheet (only from the reset flow, after a second confirm)
+async function clearSheetBackups() {
+  const settings = loadSyncSettings();
+  try {
+    const response = await fetch(settings.url, {
+      method: "POST",
+      body: JSON.stringify({ key: settings.key, clearAll: true })
+    });
+    const result = await response.json();
+    if (!result.ok) throw new Error(result.error);
+    alert("Deleted " + result.deleted + " backups in Google Sheet. / गूगल शीट के बैकअप हटाए गए।");
+  } catch (err) {
+    alert("Could not delete the Sheet backups. / शीट के बैकअप नहीं हटे।\n" + err.message);
+  }
+}
+
+// Retry when the phone is online again, or when the app comes back to the screen.
+window.addEventListener("online", syncNow);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") { renderSyncStatus(); syncNow(); }
+});
+setInterval(renderSyncStatus, 60000);
+
 // ---------- Start ----------
 render();
+renderSyncStatus();
+syncNow();
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js");
